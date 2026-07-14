@@ -1,0 +1,7 @@
+prefix                       = "contoso"
+connectivity_subscription_id = "00000000-0000-0000-0000-000000000002"
+hub_address_space            = "10.0.0.0/24"
+spoke_address_spaces         = ["10.1.0.0/16", "10.2.0.0/16"]
+deploy_vpn_gateway           = false
+deploy_bastion               = true
+state_storage_account_name   = "sttfstateREPLACEME"

@@ -1,0 +1,9 @@
+workload                   = "crm"
+workload_subscription_id   = "00000000-0000-0000-0000-000000000010"
+spoke_address_space        = "10.1.0.0/22"
+app_owner                  = "crm-team@contoso.com"
+cost_center                = "CC-CRM"
+monthly_budget_amount      = 800
+budget_start_date          = "2026-08-01T00:00:00Z"
+budget_contact_emails      = ["crm-team@contoso.com"]
+state_storage_account_name = "sttfstateREPLACEME"

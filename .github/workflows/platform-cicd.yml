@@ -1,0 +1,154 @@
+###############################################################################
+# Step 7: DevOps & Automation - GitHub Actions
+# Plan on PR, apply on merge to main (with environment approval gate).
+# Auth: OIDC federation - no client secrets (see modules/identity).
+###############################################################################
+name: platform-cicd
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["environments/**", "modules/**"]
+  push:
+    branches: [main]
+    paths: ["environments/**", "modules/**"]
+  workflow_dispatch:
+    inputs:
+      environment_dir:
+        description: "Environment folder to target"
+        required: true
+        default: "mgmt"
+        type: choice
+        options: [mgmt, connectivity, landingzone-prod]
+
+permissions:
+  id-token: write   # OIDC token for azure/login
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.9.8"
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Static checks: fmt, validate, tflint, checkov, gitleaks
+  # ---------------------------------------------------------------------
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [environments/mgmt, environments/connectivity, environments/landingzone-prod]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v4
+      - run: tflint --recursive --minimum-failure-severity=error
+
+      - name: Checkov (IaC security scan)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ matrix.dir }}
+          framework: terraform
+          soft_fail: false
+          skip_check: CKV_AZURE_59 # example org exception, document each skip
+
+      - name: Gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------
+  # Plan on pull request, post the plan back to the PR
+  # ---------------------------------------------------------------------
+  plan:
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: plan
+    strategy:
+      matrix:
+        dir: [environments/mgmt, environments/connectivity]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -backend-config=backend.hcl
+          terraform plan -input=false -no-color -out=tfplan | tee plan.txt
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ matrix.dir }}/plan.txt', 'utf8');
+            const body = `### Terraform plan: \`${{ matrix.dir }}\`\n<details><summary>Show plan</summary>\n\n\`\`\`\n${plan.slice(0, 60000)}\n\`\`\`\n</details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+  # ---------------------------------------------------------------------
+  # Apply on merge to main - gated by 'apply' environment reviewers
+  # ---------------------------------------------------------------------
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: apply   # configure required reviewers on this environment
+    strategy:
+      max-parallel: 1    # mgmt before connectivity (remote state dependency)
+      matrix:
+        dir: [environments/mgmt, environments/connectivity]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform apply
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -backend-config=backend.hcl
+          terraform apply -input=false -auto-approve

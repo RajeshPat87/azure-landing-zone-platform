@@ -1,0 +1,9 @@
+prefix                       = "contoso"
+org_display_name             = "Contoso"
+location                     = "centralindia"
+location_short               = "cin"
+allowed_locations            = ["centralindia", "southindia"]
+management_subscription_id   = "00000000-0000-0000-0000-000000000001"
+connectivity_subscription_id = "00000000-0000-0000-0000-000000000002"
+identity_subscription_id     = "00000000-0000-0000-0000-000000000003"
+github_repository            = "RajeshPat87/azure-landing-zone-platform"

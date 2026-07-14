@@ -1,0 +1,149 @@
+###############################################################################
+# Step 7 alternative: Azure DevOps pipeline (multi-stage)
+# Service connection: Workload Identity Federation recommended (no secrets).
+###############################################################################
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include: [environments/*, modules/*]
+
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  tfVersion: "1.9.8"
+  serviceConnection: "sc-azure-platform"   # ADO service connection name
+  backendRg: "rg-tfstate-prod-cin"
+  backendSa: "sttfstateREPLACEME"
+  backendContainer: "tfstate"
+
+stages:
+  # -------------------------------------------------------------------
+  - stage: Validate
+    displayName: "Validate & Scan"
+    jobs:
+      - job: static_checks
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(tfVersion)
+
+          - script: terraform fmt -check -recursive
+            displayName: "terraform fmt"
+
+          - script: |
+              for d in environments/mgmt environments/connectivity environments/landingzone-prod; do
+                (cd $d && terraform init -backend=false && terraform validate)
+              done
+            displayName: "terraform validate"
+
+          - script: |
+              pip install checkov
+              checkov -d . --framework terraform --compact
+            displayName: "Checkov IaC scan"
+
+  # -------------------------------------------------------------------
+  - stage: Plan_Mgmt
+    displayName: "Plan: mgmt"
+    dependsOn: Validate
+    jobs:
+      - job: plan
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(tfVersion)
+          - task: TerraformTaskV4@4
+            displayName: "init"
+            inputs:
+              provider: azurerm
+              command: init
+              workingDirectory: environments/mgmt
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(backendRg)
+              backendAzureRmStorageAccountName: $(backendSa)
+              backendAzureRmContainerName: $(backendContainer)
+              backendAzureRmKey: platform/mgmt.tfstate
+          - task: TerraformTaskV4@4
+            displayName: "plan"
+            inputs:
+              provider: azurerm
+              command: plan
+              workingDirectory: environments/mgmt
+              environmentServiceNameAzureRM: $(serviceConnection)
+
+  # -------------------------------------------------------------------
+  - stage: Apply_Mgmt
+    displayName: "Apply: mgmt (approval gated)"
+    dependsOn: Plan_Mgmt
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: apply
+        environment: platform-prod   # add approvals on this ADO environment
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: TerraformInstaller@1
+                  inputs:
+                    terraformVersion: $(tfVersion)
+                - task: TerraformTaskV4@4
+                  displayName: "init"
+                  inputs:
+                    provider: azurerm
+                    command: init
+                    workingDirectory: environments/mgmt
+                    backendServiceArm: $(serviceConnection)
+                    backendAzureRmResourceGroupName: $(backendRg)
+                    backendAzureRmStorageAccountName: $(backendSa)
+                    backendAzureRmContainerName: $(backendContainer)
+                    backendAzureRmKey: platform/mgmt.tfstate
+                - task: TerraformTaskV4@4
+                  displayName: "apply"
+                  inputs:
+                    provider: azurerm
+                    command: apply
+                    workingDirectory: environments/mgmt
+                    environmentServiceNameAzureRM: $(serviceConnection)
+                    commandOptions: -auto-approve
+
+  # -------------------------------------------------------------------
+  - stage: Apply_Connectivity
+    displayName: "Apply: connectivity (approval gated)"
+    dependsOn: Apply_Mgmt
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: apply
+        environment: platform-prod
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: TerraformInstaller@1
+                  inputs:
+                    terraformVersion: $(tfVersion)
+                - task: TerraformTaskV4@4
+                  displayName: "init"
+                  inputs:
+                    provider: azurerm
+                    command: init
+                    workingDirectory: environments/connectivity
+                    backendServiceArm: $(serviceConnection)
+                    backendAzureRmResourceGroupName: $(backendRg)
+                    backendAzureRmStorageAccountName: $(backendSa)
+                    backendAzureRmContainerName: $(backendContainer)
+                    backendAzureRmKey: platform/connectivity.tfstate
+                - task: TerraformTaskV4@4
+                  displayName: "apply"
+                  inputs:
+                    provider: azurerm
+                    command: apply
+                    workingDirectory: environments/connectivity
+                    environmentServiceNameAzureRM: $(serviceConnection)
+                    commandOptions: -auto-approve
