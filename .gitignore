@@ -20,3 +20,14 @@ override.tf.json
 .vscode/
 .idea/
 .DS_Store
+
+# Claude automation — local, per-user, secret-bearing
+.claude/hooks/config.env
+.claude/scripts/*.local.sh
+# Never commit lab credentials dropped into the repo (data files only —
+# the refresh *script* below is committed template code, not a secret)
+*azure-lab-creds*.json
+*azure-lab-creds*.env
+*creds.env
+!.claude/hooks/config.env.example
+!.claude/scripts/azure-lab-creds.sh
