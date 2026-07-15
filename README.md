@@ -2,6 +2,8 @@
 
 Ready-to-use Terraform platform engineering repo implementing the 10-step Azure Landing Zone blueprint: tenant foundation, management groups, subscription vending, core central services, hub-spoke networking, governance, CI/CD, and standardized app onboarding.
 
+**AI-assisted, safely.** This repo is also the reference implementation of an org-wide strategy for running Claude Code against infrastructure without letting an AI break production. A committed `.claude/` guardrail template denies irreversible operations, ASK-gates privileged changes, and injects short-lived credentials — so the same agent that plans a landing zone can never silently `terraform destroy` one or leak a secret. See [Claude Code automation](#claude-code-automation--safety), [`CLAUDE.md`](CLAUDE.md), and [`docs/CLAUDE-AUTOMATION.md`](docs/CLAUDE-AUTOMATION.md).
+
 ## Blueprint step to code mapping
 
 | Step | Blueprint stage | Where in this repo |
@@ -35,7 +37,13 @@ Ready-to-use Terraform platform engineering repo implementing the 10-step Azure 
 │   └── landingzone-prod/        # One instance per onboarded application
 ├── .github/workflows/           # GitHub Actions CI/CD (OIDC, plan-on-PR, gated apply)
 ├── pipelines/                   # Azure DevOps alternative
-└── scripts/                     # State bootstrap + provider registration
+├── scripts/                     # State bootstrap + provider registration
+├── .claude/                     # Claude Code guardrails (20-hook lifecycle, Profile A)
+│   ├── hooks/                   # session-start / user-prompt / pre+post-tool-use / stop / session-end
+│   ├── scripts/                 # azure-lab-creds.sh — rotating SP login
+│   └── skills/                  # infra-safety-hooks reference
+├── CLAUDE.md                    # Repo guardrails + conventions Claude reads first
+└── docs/CLAUDE-AUTOMATION.md    # Org-wide Claude automation strategy
 ```
 
 ## Deployment order
@@ -107,6 +115,42 @@ GitHub repo secrets:
 Create GitHub environments `plan` and `apply`; add required reviewers on `apply`. Auth is OIDC federated - no client secrets stored anywhere.
 
 Flow: PR -> fmt/validate/TFLint/Checkov/Gitleaks -> plan posted as PR comment -> merge -> approval gate -> apply (mgmt first, then connectivity).
+
+## Claude Code automation & safety
+
+The repo ships its own `.claude/` so the rules that keep an AI agent safe travel with the code and are reviewed like code — no reliance on individual local settings. This is **Profile A (IaC / Terraform + Azure)** of the org-wide strategy in [`docs/CLAUDE-AUTOMATION.md`](docs/CLAUDE-AUTOMATION.md); the same template drops into the IDP repo (Profile B) and application repos (Profile C).
+
+### Guardrails (the 20-hook lifecycle)
+
+Six Claude Code lifecycle hooks (`SessionStart` → `UserPromptSubmit` → `PreToolUse` → `PostToolUse` → `Stop` → `SessionEnd`) enforce three rules — **deny the irreversible, ask for the privileged, validate every edit**:
+
+| What Claude tries | Result |
+|-------------------|--------|
+| Print/read `*.tfstate`, `*.tfvars`, `az` tokens, Key Vault secret values | **DENY** |
+| `terraform state rm` / `force-unlock`, `az group`/`mg delete`, `--purge` | **DENY** |
+| `terraform apply` / `destroy` (incl. `-auto-approve`) | **ASK** — reviewed plan first |
+| Edit `providers.tf`, `backend.hcl`, governance/identity/MG modules, CI workflows | **ASK** — tenant-wide blast radius |
+| `az` sub doesn't match the target `environments/<env>` | **ASK** — wrong-subscription guard |
+| Any file edit | auto `terraform fmt` · `tflint` · `validate` on save |
+
+The full map lives in [`.claude/skills/infra-safety-hooks/SKILL.md`](.claude/skills/infra-safety-hooks/SKILL.md). Change infra through Terraform, not imperative `az`; `terraform fmt -recursive` is enforced by the definition-of-done gate before a session can end.
+
+### Local auth for AI-assisted work (rotating lab credentials)
+
+Auth is **injected, never stored** — CI uses OIDC (above); local Claude sessions use short-lived service-principal creds pulled from a file the lab rotates ~hourly. Claude never sees a long-lived secret and none enters the transcript.
+
+```bash
+# 1. Drop the lab's SP creds (JSON or KEY=VALUE .env) at a probed path,
+#    or point Claude at it explicitly:
+export ALZ_AZURE_CREDS_FILE=/path/to/azure-lab-creds.json
+
+# 2. Warm the login (SessionStart does this for you automatically):
+.claude/scripts/azure-lab-creds.sh --force        # or --check / --export
+```
+
+`SessionStart` warms the login; `PreToolUse` re-checks freshness (>50 min ⇒ re-login) before every `terraform`/`az` call, so a mid-session rotation **self-heals** — no manual re-auth. The Azure CLI token cache carries auth into Terraform's azurerm provider automatically. Credential files (`*azure-lab-creds*.json/.env`, `.claude/hooks/config.env`) are gitignored; only `*.example` templates are committed.
+
+**Hourly rotation:** you maintain just one JSON file; the automation handles login, freshness, and token propagation. Full flow — file format, accepted keys, per-step behavior, and the update loop — is in [`docs/CREDENTIALS-REFRESH.md`](docs/CREDENTIALS-REFRESH.md).
 
 ## Design decisions
 
