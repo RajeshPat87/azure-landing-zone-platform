@@ -7,8 +7,8 @@ onboarding → operations → continuous improvement).
 
 **This single README is the run book.** It first walks the whole flow **locally from WSL**,
 then runs the *same* Terraform **from GitHub Actions (and Azure DevOps) pipelines**. It also
-consolidates what used to live in `docs/` (design notes, credential rotation, the Claude
-automation strategy, and the guardrail hook map) so you have one place to operate from.
+consolidates the design notes, credential rotation, the Claude automation strategy, and the
+guardrail hook map so you have one place to operate from.
 
 **AI-assisted, safely.** The repo ships a committed `.claude/` guardrail template that denies
 irreversible operations, ASK-gates privileged changes, and injects short-lived credentials —
@@ -107,10 +107,9 @@ subscription; the **corp MG** adds a deny-public-IP restriction on top.
 └── README.md                    # ← this run book
 ```
 
-> **Note on `docs/`:** the design notes, credential-rotation guide, and Claude-automation
-> strategy that previously lived under `docs/` are now consolidated into this README
-> (sections 8–12). The `docs/` files remain as deep-dive references but this README is the
-> single operating source.
+> **Single source:** the design notes, credential-rotation guide, and Claude-automation
+> strategy that previously lived under `docs/` are now fully consolidated into this README
+> (sections 8–12). This README is the single operating source — there is no separate `docs/`.
 
 ---
 

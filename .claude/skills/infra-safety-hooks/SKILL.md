@@ -99,7 +99,7 @@ export ALZ_AZURE_CREDS_FILE=/path/to/lab-creds.json   # or .env
 - New destructive patterns → add to the Hook 06 `case` (deny) block.
 - Add Helm/AKS gates (10, 14) when a `modules/aks-platform` lands.
 - Reuse everywhere: this whole `.claude/` tree is the portable template described in
-  `docs/CLAUDE-AUTOMATION.md` (landing zone → IDP → any repo).
+  the repo `README.md` (§8 Claude Code automation & guardrails) — landing zone → IDP → any repo.
 
 ## Testing a hook
 

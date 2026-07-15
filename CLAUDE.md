@@ -32,4 +32,4 @@ Local Azure auth comes from a shared creds file that the lab refreshes hourly.
 
 ## Reuse
 `.claude/` here is the reference implementation of the org-wide Claude automation strategy
-(`docs/CLAUDE-AUTOMATION.md`) — the same template drops into the IDP repo and any other repo.
+(see [`README.md`](README.md#8-claude-code-automation--guardrails)) — the same template drops into the IDP repo and any other repo.
