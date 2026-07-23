@@ -1,5 +1,7 @@
 # Azure Landing Zone Platform — End-to-End Runbook
 
+[![Terraform CI](https://github.com/RajeshPat87/azure-landing-zone-platform/actions/workflows/terraform-ci.yml/badge.svg)](https://github.com/RajeshPat87/azure-landing-zone-platform/actions/workflows/terraform-ci.yml)
+
 A ready-to-use Terraform platform-engineering repo that implements the 10-step Azure
 Landing Zone blueprint (tenant foundation → management groups → subscription vending →
 core central services → hub-spoke networking → governance → CI/CD → standardized app

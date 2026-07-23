@@ -1,0 +1,97 @@
+# .github/workflows/terraform-ci.yml
+#
+# Credential-free Terraform CI: fmt, validate, lint, and a security scan.
+# No cloud login required, so it runs green on every push and PR.
+#
+# Badge (already wired into README.md):
+#   [![Terraform CI](https://github.com/RajeshPat87/azure-landing-zone-platform/actions/workflows/terraform-ci.yml/badge.svg)](https://github.com/RajeshPat87/azure-landing-zone-platform/actions/workflows/terraform-ci.yml)
+#
+# A `plan` job was intentionally left out: this repo already runs plan/apply in
+# platform-cicd.yml with Azure OIDC. Keeping CI credential-free is what keeps the
+# badge reliably green.
+
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.9.8"
+  TF_IN_AUTOMATION: "true"
+  # Root module used for init/validate. fmt/lint still cover the whole repo.
+  WORKING_DIR: "environments/mgmt"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1. Static checks. No cloud credentials needed — runs on every fork/PR.
+  # -------------------------------------------------------------------------
+  validate:
+    name: Format, Validate, Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform init (no backend)
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform validate -no-color
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: tflint
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+
+  # -------------------------------------------------------------------------
+  # 2. Security / policy scan. Results land in the Security tab via SARIF.
+  #    soft_fail is on so findings surface without turning the badge red —
+  #    flip it to false once the backlog in the Security tab is cleared.
+  # -------------------------------------------------------------------------
+  scan:
+    name: Checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov.sarif
